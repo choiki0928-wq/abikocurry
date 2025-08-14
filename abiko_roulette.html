@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ABIKO Roulette — Show to Staff</title>
+<style>
+  :root{ --brand-yellow:#FFE45C; --brand-brown:#4B2E19; --brand-brown-dark:#3A1F11; --text:#222; }
+  body{ margin:0; font-family: system-ui, -apple-system, "Noto Sans KR", "Apple SD Gothic Neo", Roboto, Arial, sans-serif;
+        background:#fffaf0; color:var(--text); display:flex; align-items:center; justify-content:center; min-height:100vh; padding:16px; }
+  .card{ background:#fff; width:min(720px, 100%); border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,.08); overflow:hidden; border:1px solid #eee; }
+  header{ background:var(--brand-yellow); color:var(--brand-brown); padding:16px 20px; display:flex; align-items:center; gap:12px; }
+  header .logo{ font-weight:900; letter-spacing:.5px; }
+  header .sub{ font-size:.9rem; opacity:.9; }
+  .wrap{ display:grid; grid-template-columns: 1fr; gap:16px; padding:16px; }
+  .wheel-area{ display:flex; align-items:center; justify-content:center; position:relative; }
+  canvas{ width: min(420px, 90vw); height: auto; }
+  .pointer{ position:absolute; top:6px; width:0;height:0; border-left:18px solid transparent; border-right:18px solid transparent; border-bottom:26px solid var(--brand-brown);
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,.2)); }
+  .controls{ display:flex; flex-direction:column; align-items:center; gap:10px; padding-bottom:10px; }
+  button.spin{ background:var(--brand-brown); color:#fff; border:none; border-radius:999px; padding:14px 28px; font-size:1.05rem; font-weight:700; cursor:pointer; transition:transform .06s ease, opacity .2s ease; }
+  button.spin:active{ transform:scale(.98); }
+  button.spin[disabled]{ opacity:.5; cursor:not-allowed; }
+  .note{ font-size:.88rem;color:#666;text-align:center; }
+  .result{ text-align:center;padding:8px 12px 16px; }
+  .result .title{ font-weight:800; color:var(--brand-brown); }
+  .prize{ font-size:1.2rem;font-weight:900;color:var(--brand-brown); }
+  .coupon{ margin-top:8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#f7f2e7;border:1px dashed #e2d9c6;
+           border-radius:10px;padding:8px 10px;display:inline-block; }
+  footer{ padding:10px 16px 18px;text-align:center;font-size:.8rem;color:#777; }
+  dialog { border:none;padding:0;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(420px, 92vw); }
+  dialog::backdrop{ background: rgba(0,0,0,.35); }
+  .modal-head{ background:var(--brand-yellow);color:var(--brand-brown);padding:12px 16px;font-weight:900; }
+  .modal-body{ padding:16px; }
+  .modal-actions{ padding:0 16px 16px;display:flex;justify-content:center; }
+  .btn{ background:var(--brand-brown);color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer; }
+  .grid{ display:grid; gap:6px; grid-template-columns: 1fr 1fr; font-size:.9rem; color:#555; }
+  .grid div{ background:#faf8f2; border:1px solid #f0eadf; border-radius:8px; padding:8px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <header>
+      <div class="logo">ABIKO CURRY · Roulette</div>
+      <div class="sub">한 번 돌려 오늘의 혜택 받기</div>
+    </header>
+    <div class="wrap">
+      <div class="wheel-area">
+        <div class="pointer"></div>
+        <canvas id="wheel" width="520" height="520"></canvas>
+      </div>
+
+      <div class="controls">
+        <button class="spin" id="spinBtn">돌리기</button>
+        <div class="note">※ 1일 1회 참여 가능합니다. (동일 기기 기준)</div>
+      </div>
+
+      <div class="result" id="resultBox" hidden>
+        <div class="title">당첨 결과</div>
+        <div class="prize" id="prizeText"></div>
+        <div class="coupon" id="couponBox" hidden></div>
+      </div>
+
+      <div class="grid" id="legendBox" style="display:none;"></div>
+    </div>
+
+    <footer>행사 내용은 매장 상황에 따라 변경될 수 있습니다.</footer>
+  </div>
+
+  <dialog id="modal">
+    <div class="modal-head">오늘도 도전 성공!</div>
+    <div class="modal-body">
+      <div style="text-align:center; font-weight:800; color:var(--brand-brown); margin-bottom:6px;">축하합니다 🎉</div>
+      <div id="modalPrize" style="text-align:center; font-size:1.15rem; font-weight:900; color:var(--brand-brown);"></div>
+      <div id="modalCoupon" style="text-align:center; margin-top:10px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="okBtn">확인</button>
+    </div>
+  </dialog>
+
+<script>
+// =============== CONFIG ===============
+const PRIZES = [
+  { label: "눈꽃치즈", weight: 35, color: "#f9d071" },
+  { label: "온천계란", weight: 35, color: "#f6b26b" },
+  { label: "돈까스",   weight: 3,  color: "#f4cccc" },
+  { label: "치킨가라아게", weight: 7, color: "#cfe2f3" },
+  { label: "음료",     weight: 20, color: "#d9ead3" }
+];
+const ONE_PER_DAY = true;              // 1일 1회 제한
+const SHOW_MESSAGE_ONLY = true;        // 쿠폰코드 대신 안내문
+const STAFF_MESSAGE = "직원에게 보여주세요"; // 안내 문구
+const SHOW_DATE = true;                // 오늘 날짜 표시(스크린샷 재활용 방지용)
+// 회전 설정
+const BASE_ROTATIONS = 4, EXTRA_ROTATIONS = 2;
+// =====================================
+
+const canvas = document.getElementById('wheel');
+const ctx = canvas.getContext('2d');
+const spinBtn = document.getElementById('spinBtn');
+const resultBox = document.getElementById('resultBox');
+const prizeText = document.getElementById('prizeText');
+const couponBox = document.getElementById('couponBox');
+const modal = document.getElementById('modal');
+const okBtn = document.getElementById('okBtn');
+
+let angle = 0;
+const center = { x: canvas.width/2, y: canvas.height/2 };
+const radius = Math.min(canvas.width, canvas.height)/2 - 10;
+const segCount = PRIZES.length;
+const segAngle = (Math.PI * 2) / segCount;
+const totalWeight = PRIZES.reduce((s,p)=> s + p.weight, 0);
+
+function drawWheel(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();
+  ctx.translate(center.x, center.y);
+  ctx.rotate(angle);
+  for(let i=0;i<segCount;i++){
+    const start = i * segAngle, end = start + segAngle;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,radius,start,end);
+    ctx.fillStyle = PRIZES[i].color || (i%2? '#ffe599' : '#f9cb9c'); ctx.fill(); ctx.closePath();
+    ctx.strokeStyle = 'rgba(0,0,0,.08)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0,0,radius,start,end); ctx.stroke();
+    ctx.save(); ctx.fillStyle = '#3A1F11'; ctx.rotate(start + segAngle/2);
+    ctx.textAlign = 'right'; ctx.font = 'bold 18px "Noto Sans KR", Arial';
+    wrapText(ctx, PRIZES[i].label, radius-14, 0, 140, 20);
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0,0,70,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle='#e6dac0'; ctx.stroke();
+  ctx.fillStyle='#4B2E19'; ctx.font='bold 18px "Noto Sans KR", Arial'; ctx.textAlign='center';
+  ctx.fillText('ABIKO',0,-4); ctx.font='bold 12px "Noto Sans KR", Arial'; ctx.fillText('Spin!',0,14);
+  ctx.restore();
+}
+
+function wrapText(context, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' '); let line = ''; const lines = [];
+  for (let n = 0; n < words.length; n++) {
+    const test = line + words[n] + ' ';
+    if (context.measureText(test).width > maxWidth && n > 0) { lines.push(line.trim()); line = words[n] + ' '; }
+    else line = test;
+  }
+  lines.push(line.trim());
+  const offsetY = -(lines.length-1)*lineHeight/2 + y;
+  lines.forEach((ln, i)=> context.fillText(ln, x, offsetY + i*lineHeight));
+}
+
+function chooseWeightedIndex(){
+  let r = Math.random() * totalWeight;
+  for(let i=0;i<PRIZES.length;i++){ r -= PRIZES[i].weight; if(r <= 0) return i; }
+  return PRIZES.length-1;
+}
+
+function spin(){
+  if(ONE_PER_DAY && !canSpinToday()){
+    alert('오늘은 이미 참여하셨습니다. 내일 다시 참여해 주세요!'); return;
+  }
+  spinBtn.disabled = true;
+  const winIndex = chooseWeightedIndex();
+  const mid = (winIndex + 0.5) * segAngle;
+  const baseTarget = -Math.PI/2 - mid;
+  const extra = BASE_ROTATIONS + Math.floor(Math.random()*(EXTRA_ROTATIONS+1));
+  let k = Math.ceil((angle - baseTarget)/(Math.PI*2)) + extra;
+  let finalAngle = baseTarget + k*(Math.PI*2);
+  const duration = 4500, startAngle = angle, start = performance.now();
+
+  function tick(now){
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    angle = startAngle + (finalAngle - startAngle) * eased;
+    drawWheel();
+    if(t < 1){ requestAnimationFrame(tick); }
+    else { angle = finalAngle; drawWheel(); handleResult(winIndex); spinBtn.disabled = false; if(ONE_PER_DAY) setSpinToday(); }
+  }
+  requestAnimationFrame(tick);
+}
+
+function handleResult(index){
+  const prize = PRIZES[index];
+  prizeText.textContent = prize.label;
+  resultBox.hidden = false;
+
+  let msg = STAFF_MESSAGE;
+  if(SHOW_DATE){
+    const now = new Date();
+    const date = now.toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+    msg += ` · ${date}`;
+  }
+
+  document.getElementById('modalPrize').textContent = prize.label;
+  document.getElementById('modalCoupon').innerHTML = `<div class="coupon">${msg}</div>`;
+  // 하단 결과 박스에도 동일 문구 표시
+  const couponBox = document.getElementById('couponBox');
+  couponBox.textContent = msg;
+  couponBox.hidden = false;
+
+  modal.showModal();
+}
+
+function canSpinToday(){
+  const key = 'abiko_lastSpinDate_staff';
+  const last = localStorage.getItem(key);
+  const today = new Date().toISOString().slice(0,10);
+  return last !== today;
+}
+function setSpinToday(){
+  localStorage.setItem('abiko_lastSpinDate_staff', new Date().toISOString().slice(0,10));
+}
+
+document.getElementById('spinBtn').addEventListener('click', spin);
+document.getElementById('okBtn').addEventListener('click', ()=> modal.close());
+
+drawWheel();
+</script>
+</body>
+</html>
